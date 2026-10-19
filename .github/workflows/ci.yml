@@ -179,6 +179,16 @@ jobs:
             fi
           done
 
+          # 可选文件（缺失只告警，不判失败）
+          for optional in "${FAKERINPUT_MSI:-}" 'config.template.json'; do
+            [ -n "$optional" ] || continue
+            if printf '%s\n' "$listing" | grep -qx -- "$optional"; then
+              echo "ok   $optional (可选)"
+            else
+              echo "::warning::包内没有 $optional（可选文件）"
+            fi
+          done
+
           {
             echo '### 包内清单'
             echo '```'

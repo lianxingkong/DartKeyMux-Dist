@@ -26,6 +26,7 @@ jobs:
       version: ${{ steps.resolve.outputs.version }}
       frontend: ${{ steps.resolve.outputs.frontend }}
       backend: ${{ steps.resolve.outputs.backend }}
+      fakerinput_msi: ${{ steps.resolve.outputs.fakerinput_msi }}
 
     steps:
       - uses: actions/checkout@v4
@@ -57,6 +58,7 @@ jobs:
             echo "version=$version"
             echo "frontend=$FRONTEND_REPO@$FRONTEND_TAG"
             echo "backend=$BACKEND_REPO@$BACKEND_TAG"
+            echo "fakerinput_msi=$FAKERINPUT_MSI"
           } >> "$GITHUB_OUTPUT"
 
           {
@@ -167,6 +169,7 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}
           PACKAGE_VERSION_OVERRIDE: ${{ needs.prepare.outputs.version }}
+          FAKERINPUT_MSI: ${{ needs.prepare.outputs.fakerinput_msi }}
         shell: bash
         run: |
           set -euo pipefail
@@ -211,7 +214,8 @@ jobs:
           done
 
           # 包内还应有（可选）：FakerInput 驱动安装包、后端配置模板
-          for optional in "$FAKERINPUT_MSI" 'config.template.json'; do
+          for optional in "${FAKERINPUT_MSI:-}" 'config.template.json'; do
+            [ -n "$optional" ] || continue
             if printf '%s\n' "$listing" | grep -qx -- "$optional"; then
               echo "ok   $optional (可选)"
             else
