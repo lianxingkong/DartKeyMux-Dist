@@ -132,7 +132,8 @@ asset_url() { # owner/repo tag asset
 check_asset() { # owner/repo tag asset
   local url
   url="$(asset_url "$1" "$2" "$3")"
-  if curl -fsSL -o /dev/null --head "${CURL_OPTS[@]}" "${CURL_AUTH[@]}" "$url"; then
+  # -L 必须带：GitHub 的 release 下载 URL 会 302 跳到 blob 存储，--head 不跟随重定向
+  if curl -fsSIL -o /dev/null "${CURL_OPTS[@]}" "${CURL_AUTH[@]}" "$url"; then
     echo "    ok  $3"
   else
     echo "assemble.sh: 资产不存在 —— $1@$2 里找不到 '$3'" >&2

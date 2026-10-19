@@ -89,7 +89,8 @@ jobs:
           check() {
             local url="https://github.com/$1/releases/download/$2/$3"
             echo "检查 $1@$2 -> $3"
-            curl -fsSL -o /dev/null --head "${AUTH[@]}" "$url" || {
+            # -L 必须带：release 下载 URL 会 302 跳到 blob 存储
+            curl -fsSIL --retry 3 --retry-delay 2 -o /dev/null "${AUTH[@]}" "$url" || {
               echo "::error::资产不存在: $url"
               exit 1
             }

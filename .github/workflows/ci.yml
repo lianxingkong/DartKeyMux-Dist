@@ -93,7 +93,8 @@ jobs:
 
           check() { # repo tag asset
             local url="https://github.com/$1/releases/download/$2/$3"
-            if curl -fsSL -o /dev/null --head "${AUTH[@]}" "$url"; then
+            # -L 必须带：release 下载 URL 会 302 跳到 blob 存储
+            if curl -fsSIL --retry 3 --retry-delay 2 -o /dev/null "${AUTH[@]}" "$url"; then
               echo "::notice::$1@$2 -> $3 存在"
             else
               echo "::error::资产不存在: $1@$2 -> $3"
