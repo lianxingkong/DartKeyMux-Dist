@@ -28,7 +28,7 @@ jobs:
           # shellcheck source=/dev/null
           source ./versions.env
           set +a
-          # 把结果落成环境变量供后续步骤使用
+          # 把结果落成环境变量供后续步骤使用（source 只影响当前 shell，不会自动传给下一步）
           {
             echo "FRONTEND_REPO=$FRONTEND_REPO"
             echo "FRONTEND_TAG=$FRONTEND_TAG"
@@ -36,6 +36,8 @@ jobs:
             echo "BACKEND_REPO=$BACKEND_REPO"
             echo "BACKEND_TAG=$BACKEND_TAG"
             echo "BACKEND_ASSET_TEMPLATE=$BACKEND_ASSET_TEMPLATE"
+            echo "FAKERINPUT_MSI=$FAKERINPUT_MSI"
+            echo "PACKAGE_VERSION=$PACKAGE_VERSION"
           } >> "$GITHUB_ENV"
           echo '### versions.env' >> "$GITHUB_STEP_SUMMARY"
           echo '```' >> "$GITHUB_STEP_SUMMARY"
