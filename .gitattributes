@@ -1,0 +1,16 @@
+# 统一换行符：仓库内一律 LF，检出时按文件类型还原。
+#
+# .bat 必须是 CRLF：cmd.exe 对 LF 结尾的批处理在 if(...) 块里有解析异常的风险。
+* text=auto eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+*.ps1 text eol=crlf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.msi binary
+*.zip binary
+*.apk binary
+*.exe binary
+*.dll binary

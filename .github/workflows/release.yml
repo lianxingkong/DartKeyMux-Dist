@@ -1,0 +1,261 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      force_version:
+        description: '强制指定打包版本号（留空则用 versions.env 的 PACKAGE_VERSION；tag 触发时以 tag 为准）'
+        required: false
+        default: ''
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 解析版本号：tag > 手动输入 > versions.env
+  # ---------------------------------------------------------------------------
+  prepare:
+    name: 解析版本
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+      frontend: ${{ steps.resolve.outputs.frontend }}
+      backend: ${{ steps.resolve.outputs.backend }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 解析
+        id: resolve
+        env:
+          FORCE_VERSION: ${{ github.event.inputs.force_version }}
+        run: |
+          set -euo pipefail
+          set -a
+          # shellcheck source=/dev/null
+          source ./versions.env
+          set +a
+
+          version="$PACKAGE_VERSION"
+          if [ "$GITHUB_REF_TYPE" = "tag" ]; then
+            version="$GITHUB_REF_NAME"
+          elif [ -n "${FORCE_VERSION:-}" ]; then
+            version="$FORCE_VERSION"
+          fi
+
+          if ! printf '%s' "$version" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+'; then
+            echo "::error::版本号 '$version' 不像 vX.Y.Z，拒绝发版"
+            exit 1
+          fi
+
+          {
+            echo "version=$version"
+            echo "frontend=$FRONTEND_REPO@$FRONTEND_TAG"
+            echo "backend=$BACKEND_REPO@$BACKEND_TAG"
+          } >> "$GITHUB_OUTPUT"
+
+          {
+            echo "### 本次发版"
+            echo ""
+            echo "| 项 | 值 |"
+            echo "| --- | --- |"
+            echo "| 包版本 | \`$version\` |"
+            echo "| 前端 | \`$FRONTEND_REPO@$FRONTEND_TAG\` |"
+            echo "| 后端 | \`$BACKEND_REPO@$BACKEND_TAG\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 确认前后端 tag 与资产存在
+        env:
+          # 两个仓库都是 public，默认 GITHUB_TOKEN 即可下载；
+          # 配了 secrets.PAT 就用 PAT（更稳，且不受匿名速率限制影响）。
+          CURL_TOKEN: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          set -a
+          # shellcheck source=/dev/null
+          source ./versions.env
+          set +a
+
+          AUTH=()
+          if [ -n "${CURL_TOKEN:-}" ]; then
+            AUTH=(-H "Authorization: Bearer ${CURL_TOKEN}")
+          fi
+
+          check() {
+            local url="https://github.com/$1/releases/download/$2/$3"
+            echo "检查 $1@$2 -> $3"
+            curl -fsSL -o /dev/null --head "${AUTH[@]}" "$url" || {
+              echo "::error::资产不存在: $url"
+              exit 1
+            }
+          }
+
+          check "$FRONTEND_REPO" "$FRONTEND_TAG" "$FRONTEND_ASSET"
+          for arch in amd64 386; do
+            check "$BACKEND_REPO" "$BACKEND_TAG" "${BACKEND_ASSET_TEMPLATE//\{arch\}/$arch}"
+          done
+
+  # ---------------------------------------------------------------------------
+  # 打包：每个架构一个包
+  # ---------------------------------------------------------------------------
+  build:
+    name: 打包 ${{ matrix.arch }}
+    needs: prepare
+    runs-on: windows-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [amd64, 386]
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 unzip
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          if (-not (Get-Command unzip -ErrorAction SilentlyContinue)) {
+            choco install unzip -y --no-progress
+            "C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          }
+          unzip -v | Select-Object -First 2
+
+      - name: 执行 assemble.sh
+        env:
+          ARCH: ${{ matrix.arch }}
+          PACKAGE_VERSION_OVERRIDE: ${{ needs.prepare.outputs.version }}
+          GITHUB_TOKEN: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          chmod +x scripts/assemble.sh
+          ./scripts/assemble.sh
+
+      - name: 校验产物结构
+        env:
+          ARCH: ${{ matrix.arch }}
+          PACKAGE_VERSION_OVERRIDE: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          zip_file="dist/app-${PACKAGE_VERSION_OVERRIDE}-windows-${ARCH}.zip"
+          [ -f "$zip_file" ] || { echo "::error::没有产出 $zip_file"; exit 1; }
+
+          listing="$(unzip -Z1 "$zip_file")"
+          for required in \
+            'start-amd64.bat' \
+            'start-386.bat' \
+            'app/app-release.apk' \
+            'backend/amd64/GoKeyMux.exe' \
+            'backend/386/GoKeyMux.exe' \
+            'backend/amd64/Interception/library/x64/interception.dll' \
+            'platform-tools/adb.exe' \
+            'install-fakerinput.ps1' \
+            'README.md' ; do
+            if printf '%s\n' "$listing" | grep -qx "$required"; then
+              echo "ok   $required"
+            else
+              echo "::error::$zip_file 内缺少 $required"
+              exit 1
+            fi
+          done
+
+          {
+            echo "### \`$zip_file\`"
+            echo '```'
+            unzip -l "$zip_file"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 生成校验和
+        env:
+          ARCH: ${{ matrix.arch }}
+          PACKAGE_VERSION_OVERRIDE: ${{ needs.prepare.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd dist
+          if command -v sha256sum >/dev/null 2>&1; then
+            sha256sum "app-${PACKAGE_VERSION_OVERRIDE}-windows-${ARCH}.zip" >> SHA256SUMS
+          else
+            # GitHub Windows runner 走这条
+            certutil -hashfile "app-${PACKAGE_VERSION_OVERRIDE}-windows-${ARCH}.zip" SHA256 \
+              | sed -n 2p \
+              | tr -d ' \r' \
+              | sed "s|\$|  app-${PACKAGE_VERSION_OVERRIDE}-windows-${ARCH}.zip|" >> SHA256SUMS
+          fi
+          cat SHA256SUMS
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: package-${{ matrix.arch }}
+          path: |
+            dist/*.zip
+            dist/SHA256SUMS
+          if-no-files-found: error
+          retention-days: 7
+
+  # ---------------------------------------------------------------------------
+  # 发布：合并所有产物，创建或更新 release
+  # ---------------------------------------------------------------------------
+  publish:
+    name: 发布 release
+    needs: [prepare, build]
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 下载全部产物
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: 列出待发布文件
+        run: ls -lh dist
+
+      - name: 创建或更新 release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ needs.prepare.outputs.version }}
+          FE: ${{ needs.prepare.outputs.frontend }}
+          BE: ${{ needs.prepare.outputs.backend }}
+        run: |
+          set -euo pipefail
+
+          notes="$(mktemp)"
+          {
+            echo "## DartKeyMux 整合分发包 $VERSION"
+            echo ""
+            echo "解压即用：双击 \`start-amd64.bat\`（64 位系统，推荐）或 \`start-386.bat\`（32 位系统）。"
+            echo ""
+            echo "| 项 | 对应版本 |"
+            echo "| --- | --- |"
+            echo "| 前端 Flutter App | \`$FE\` |"
+            echo "| 后端 GoKeyMux | \`$BE\` |"
+            echo "| gRPC / adb reverse 端口 | \`50051\` |"
+            echo ""
+            echo "包内含：前端 APK、后端 GoKeyMux（amd64 + 386）、Android platform-tools（adb）、启动脚本、FakerInput 驱动安装包。"
+            echo ""
+            echo "请下载与你的版本号一致的 zip，并用 \`SHA256SUMS\` 校验完整性。"
+            echo ""
+            echo "> 本 release 的产物由 GitHub Actions 自动构建；前/后端版本号对齐关系记录在压缩包的 \`README.md\` 中。"
+          } > "$notes"
+
+          if gh release view "$VERSION" >/dev/null 2>&1; then
+            echo "release $VERSION 已存在，改为上传资产（--clobber 覆盖同名文件）"
+            gh release upload "$VERSION" dist/*.zip dist/SHA256SUMS --clobber
+            gh release edit "$VERSION" --notes-file "$notes"
+          else
+            echo "创建 release $VERSION"
+            gh release create "$VERSION" dist/*.zip dist/SHA256SUMS \
+              --title "DartKeyMux $VERSION（整合分发）" \
+              --notes-file "$notes"
+          fi
+
+          echo "### 已发布" >> "$GITHUB_STEP_SUMMARY"
+          echo "https://github.com/$GITHUB_REPOSITORY/releases/tag/$VERSION" >> "$GITHUB_STEP_SUMMARY"

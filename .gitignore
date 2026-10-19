@@ -1,0 +1,12 @@
+# 打包产物目录（assemble.sh 输出到这里，不入库）
+dist/
+
+# 本地临时目录
+work/
+tmp/
+
+# 编辑器 / 系统杂项
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

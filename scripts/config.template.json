@@ -1,0 +1,17 @@
+{
+  "driveName": "makc",
+  "gRPCAddress": "localhost:50051",
+  "logLevel": "info",
+  "gRPCKeepaliveTime": 2,
+  "gRPCKeepaliveTimeOut": 1,
+  "gRPCKeepaliveMaxConnectionIdle": 2,
+  "gRPCEnforcementPolicyMinTime": 10,
+  "gRPCEnforcementPermitWithoutStream": true,
+  "gRPCServerShutdownTimeout": 10,
+  "winputWindowProcessName": "Game.exe",
+  "winputWindowUseStaticIndex": true,
+  "winputWindowIndex": 0,
+  "pprofAddress": "",
+  "noopLatencyMicros": 0,
+  "dispatchQueueSize": 1024
+}

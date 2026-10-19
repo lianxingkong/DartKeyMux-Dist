@@ -1,0 +1,172 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------------------------------------------------------------------
+  # 静态校验：versions.env 完整性、shell 语法、以及两个 tag 是否真实存在
+  # ---------------------------------------------------------------------------
+  lint:
+    name: 校验版本表与脚本
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 读取 versions.env
+        run: |
+          set -euo pipefail
+          [ -f versions.env ] || { echo "::error::仓库根目录缺少 versions.env"; exit 1; }
+          set -a
+          # shellcheck source=/dev/null
+          source ./versions.env
+          set +a
+          # 把结果落成环境变量供后续步骤使用
+          {
+            echo "FRONTEND_REPO=$FRONTEND_REPO"
+            echo "FRONTEND_TAG=$FRONTEND_TAG"
+            echo "FRONTEND_ASSET=$FRONTEND_ASSET"
+            echo "BACKEND_REPO=$BACKEND_REPO"
+            echo "BACKEND_TAG=$BACKEND_TAG"
+            echo "BACKEND_ASSET_TEMPLATE=$BACKEND_ASSET_TEMPLATE"
+          } >> "$GITHUB_ENV"
+          echo '### versions.env' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          cat versions.env >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+      - name: 校验变量与格式
+        run: |
+          set -euo pipefail
+          fail=0
+          for v in FRONTEND_REPO FRONTEND_TAG FRONTEND_ASSET \
+                   BACKEND_REPO BACKEND_TAG BACKEND_ASSET_TEMPLATE \
+                   FAKERINPUT_MSI PACKAGE_VERSION; do
+            if [ -z "${!v:-}" ]; then
+              echo "::error::versions.env 缺少变量 $v"
+              fail=1
+            fi
+          done
+          for v in FRONTEND_REPO BACKEND_REPO; do
+            if ! printf '%s' "${!v}" | grep -Eq '^[^/]+/[^/]+$'; then
+              echo "::error::$v 必须是 org/repo 形式，当前为 '${!v}'"
+              fail=1
+            fi
+          done
+          if ! printf '%s' "$BACKEND_ASSET_TEMPLATE" | grep -q '{arch}'; then
+            echo "::error::BACKEND_ASSET_TEMPLATE 必须包含 {arch} 占位符"
+            fail=1
+          fi
+          exit "$fail"
+
+      - name: shellcheck
+        run: |
+          set -euo pipefail
+          if ! command -v shellcheck >/dev/null 2>&1; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq shellcheck
+          fi
+          shellcheck --version
+          shellcheck -S warning scripts/assemble.sh scripts/start.sh
+
+      - name: bash 语法检查
+        run: bash -n scripts/assemble.sh scripts/start.sh
+
+      - name: 校验前后端 release 与资产确实存在
+        env:
+          CURL_TOKEN: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          AUTH=()
+          if [ -n "${CURL_TOKEN:-}" ]; then
+            AUTH=(-H "Authorization: Bearer ${CURL_TOKEN}")
+          fi
+
+          check() { # repo tag asset
+            local url="https://github.com/$1/releases/download/$2/$3"
+            if curl -fsSL -o /dev/null --head "${AUTH[@]}" "$url"; then
+              echo "::notice::$1@$2 -> $3 存在"
+            else
+              echo "::error::资产不存在: $1@$2 -> $3"
+              echo "         URL: $url"
+              echo "         请核对 versions.env，或确认该 release 已发布"
+              return 1
+            fi
+          }
+
+          rc=0
+          check "$FRONTEND_REPO" "$FRONTEND_TAG" "$FRONTEND_ASSET" || rc=1
+          for arch in amd64 386; do
+            check "$BACKEND_REPO" "$BACKEND_TAG" "${BACKEND_ASSET_TEMPLATE//\{arch\}/$arch}" || rc=1
+          done
+          exit "$rc"
+
+  # ---------------------------------------------------------------------------
+  # 冒烟：真跑一次打包，证明 assemble.sh 端到端可用（仅手动触发）
+  # ---------------------------------------------------------------------------
+  smoke:
+    name: 冒烟打包 (amd64)
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装打包依赖
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq zip unzip
+
+      - name: 执行 assemble.sh
+        run: |
+          chmod +x scripts/assemble.sh
+          ARCH=amd64 ./scripts/assemble.sh
+
+      - name: 检查产物结构
+        run: |
+          set -euo pipefail
+          set -a
+          # shellcheck source=/dev/null
+          source ./versions.env
+          set +a
+          zip_file="dist/app-${PACKAGE_VERSION}-windows-amd64.zip"
+          [ -f "$zip_file" ] || { echo "::error::没有产出 $zip_file"; exit 1; }
+
+          echo '### 包内结构' >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          unzip -l "$zip_file" >> "$GITHUB_STEP_SUMMARY"
+          echo '```' >> "$GITHUB_STEP_SUMMARY"
+
+          listing="$(unzip -Z1 "$zip_file")"
+          for required in \
+            'start-amd64.bat' \
+            'start-386.bat' \
+            'app/app-release.apk' \
+            'backend/amd64/GoKeyMux.exe' \
+            'backend/386/GoKeyMux.exe' \
+            'backend/amd64/Interception/library/x64/interception.dll' \
+            'platform-tools/adb.exe' \
+            'install-fakerinput.ps1' \
+            'README.md' ; do
+            if printf '%s\n' "$listing" | grep -qx "$required"; then
+              echo "ok   $required"
+            else
+              echo "::error::包内缺少 $required"
+              exit 1
+            fi
+          done
+
+      - name: 上传产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-package-amd64
+          path: dist/*.zip
+          if-no-files-found: error
+          retention-days: 7
