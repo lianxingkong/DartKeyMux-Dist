@@ -47,10 +47,21 @@
 ├── platform-tools/                         ← Google 官方 adb（构建时下载，非仓库内置）
 ├── config.template.json                    ← 后端配置模板（脚本首次运行会复制过去）
 ├── install-fakerinput.ps1                  ← FakerInput 驱动静默安装脚本
+├── get-adb.ps1                             ← adb 下载向导（仅当 platform-tools\ 缺失时才会用到）
 ├── start-amd64.bat                         ← 一键启动（64 位）
 ├── start-386.bat                           ← 一键启动（32 位）
 └── README.md
 ```
+
+**adb 已经打进包里，你不需要自己下 adb、也不需要梯子。** 万一 `platform-tools\`
+被删掉或拿到的是旧包，双击启动脚本会弹出一个下载方式菜单让你自选来源：
+
+| 选项 | 来源 | 说明 |
+| --- | --- | --- |
+| 1 | 腾讯云镜像 | 国内直连，推荐 |
+| 2 | 阿里云镜像 | 国内直连 |
+| 3 | Google 官方 | 国内通常需要梯子 |
+| 4 | 我自己准备 | 手动把 `platform-tools\` 放进解压目录 |
 
 本包的版本对齐关系：
 
@@ -58,7 +69,7 @@
 | --- | --- |
 | 前端 Flutter App（DartKeyMux） | 见本 release 说明或 `versions.env` 记录 |
 | 后端 Go 服务（GoKeyMux） | 同上 |
-| adb（Android platform-tools） | 构建时的 Google 最新版 |
+| adb（Android platform-tools） | 构建时从国内镜像（腾讯云/阿里云）或 Google 拉取的最新版 |
 
 ## 四、常见问题
 
@@ -84,6 +95,17 @@ A：编辑 `backend\amd64\config.json`（首次运行由 `config.template.json` 
    - `winputWindowProcessName`：默认 `Game.exe`，改成你游戏的进程名
    - `gRPCAddress`：默认 `localhost:50051`，**不要改端口**，除非前后端一起改
    - `logLevel`：`debug` / `info` / `warn` / `error`
+
+**Q：双击脚本时弹出「包内没有检测到 adb」的菜单，选哪个？**
+A：正常包是自带 adb 的，出现这个菜单说明 `platform-tools\` 缺失（被删或旧包）。
+   直接回车用默认的**选项 1 腾讯云镜像**（国内直连）即可；也可以选 2 阿里云。
+   选项 3 是 Google 官方，国内通常需要梯子。选项 4 供你自己准备 adb。
+
+**Q：adb 下载失败怎么办？**
+A：换一个源重试（优先腾讯云），或选选项 4 自己准备：
+   到任意能访问的地方下载 `platform-tools-latest-windows.zip`，解压出 `platform-tools`
+   文件夹，放到解压目录下（与 `start-amd64.bat` 同级），使存在
+   `platform-tools\adb.exe`，再重新双击脚本。
 
 **Q：后端窗口在哪？怎么退出后端？**
 A：后端以后台最小化窗口启动，在任务栏里；关闭该窗口即退出后端。

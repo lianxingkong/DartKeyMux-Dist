@@ -22,9 +22,60 @@ echo   DartKeyMux 一键启动（后端 GoKeyMux %ARCH% / gRPC 端口 50051）
 echo ============================================================
 echo.
 
-if not exist "platform-tools\adb.exe"      ( echo [错误] 缺少 platform-tools\adb.exe & goto :fail )
 if not exist "%APK%"                       ( echo [错误] 缺少 %APK% & goto :fail )
 if not exist "backend\%ARCH%\GoKeyMux.exe" ( echo [错误] 缺少 backend\%ARCH%\GoKeyMux.exe & goto :fail )
+
+rem ---------------------------------------------------------------------------
+rem  adb：包里已自带（构建时打进包），所以下面这段正常情况下不会触发。
+rem  只有 platform-tools\ 缺失（被删除 / 拿到旧包）时，才让用户自己选下载源。
+rem ---------------------------------------------------------------------------
+if exist "platform-tools\adb.exe" goto :adb_ready
+
+echo.
+echo [提示] 包内没有检测到 adb（platform-tools\adb.exe）
+echo        正常包是自带的；既然缺失，请选择下载方式：
+echo.
+echo          1. 腾讯云镜像下载（国内直连，推荐）
+echo          2. 阿里云镜像下载
+echo          3. Google 官方下载（国内通常需要梯子）
+echo          4. 我自己准备 adb（手动放进 platform-tools\ 后重新双击本脚本）
+echo.
+set "ADB_CHOICE="
+set /p "ADB_CHOICE=请输入 1-4 后回车 [默认 1]: "
+if not defined ADB_CHOICE set "ADB_CHOICE=1"
+
+if "%ADB_CHOICE%"=="4" goto :adb_manual
+
+set "ADB_URL="
+if "%ADB_CHOICE%"=="1" set "ADB_URL=https://mirrors.cloud.tencent.com/AndroidSDK/platform-tools-latest-windows.zip"
+if "%ADB_CHOICE%"=="2" set "ADB_URL=https://mirrors.aliyun.com/android.googlesource.com/platform-tools-latest-windows.zip"
+if "%ADB_CHOICE%"=="3" set "ADB_URL=https://dl.google.com/android/repository/platform-tools-latest-windows.zip"
+if not defined ADB_URL set "ADB_URL=https://mirrors.cloud.tencent.com/AndroidSDK/platform-tools-latest-windows.zip"
+
+powershell -NoProfile -ExecutionPolicy Bypass -File "get-adb.ps1" -Url "%ADB_URL%"
+if errorlevel 1 goto :adb_fail
+if not exist "platform-tools\adb.exe" goto :adb_fail
+echo [提示] adb 已就绪。
+echo.
+goto :adb_ready
+
+:adb_manual
+echo.
+echo   请把解压出来的 platform-tools 文件夹放到本目录（与本脚本同级），
+echo   使本目录下存在 platform-tools\adb.exe，然后重新双击本脚本。
+echo.
+pause
+exit /b 1
+
+:adb_fail
+echo.
+echo [错误] adb 下载失败。可换一个源重试（推荐选项 1 腾讯云镜像），
+echo        或按选项 4 自行准备 adb 放进 platform-tools\ 目录。
+echo.
+pause
+exit /b 1
+
+:adb_ready
 
 rem ---------------------------------------------------------------------------
 rem  FakerInput 输入引擎驱动：首次使用需安装一次，需要管理员权限（会弹 UAC）

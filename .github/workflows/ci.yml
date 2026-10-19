@@ -168,6 +168,7 @@ jobs:
             'backend/amd64/Interception/library/x64/interception.dll' \
             'platform-tools/adb.exe' \
             'install-fakerinput.ps1' \
+            'get-adb.ps1' \
             'README.md' ; do
             # 用 grep -c 而非 -q：-q 提前退出会触发 SIGPIPE，在 pipefail 下误判失败
             if [ "$(printf '%s\n' "$listing" | grep -cx -- "$required")" -gt 0 ]; then

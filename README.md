@@ -31,6 +31,7 @@
 │   ├── start-386.bat          # 包内启动脚本（32 位）
 │   ├── start.sh               # 非 Windows 占位说明
 │   ├── install-fakerinput.ps1 # FakerInput 驱动静默安装（自动提权）
+│   ├── get-adb.ps1            # adb 下载向导（包内 platform-tools\ 缺失时才触发）
 │   └── config.template.json   # 后端配置模板
 ├── versions.env               # ★ 唯一需要人工维护的文件：前后端版本对齐
 ├── PACKAGE-README.md          # 会被复制进 zip 当作包内 README.md
@@ -50,6 +51,12 @@ BACKEND_ASSET_TEMPLATE="GoKeyMux-windows-{arch}.zip"   # {arch} → amd64 / 386
 
 FAKERINPUT_MSI="FakerInput_Setup_0.1.1_x64.msi"
 PACKAGE_VERSION="v1.0.0"                  # 本仓库产物版本号
+
+ADB_MIRRORS=(                              # adb 下载源，按顺序尝试；前两个国内可直连
+  "腾讯云镜像|https://mirrors.cloud.tencent.com/AndroidSDK/platform-tools-latest-windows.zip"
+  "阿里云镜像|https://mirrors.aliyun.com/android.googlesource.com/platform-tools-latest-windows.zip"
+  "Google 官方|https://dl.google.com/android/repository/platform-tools-latest-windows.zip"
+)
 ```
 
 **日常唯一要做的事**：前端或后端发新 release 后，改这里的两个 tag 并推 `main`，
@@ -64,7 +71,7 @@ CI 会自动校验「tag 存在 + 资产名对得上」。
 | 架构 | **amd64 + 386** | GoKeyMux release 同时提供两个架构 |
 | 后端二进制 | `GoKeyMux.exe` | release zip 内实测 |
 | 后端运行时依赖 | `Interception/`（含 `interception.dll`）、`proto/` | 必须随包保留，删掉后端起不来 |
-| adb | 构建时从 Google 现拉，**不入库** | `platform-tools-latest-windows.zip` |
+| adb | 构建时从 `ADB_MIRRORS` 按序下载（腾讯云 → 阿里云 → Google），**打进包但不入库** | `platform-tools-latest-windows.zip` |
 
 ## 产物
 
@@ -82,9 +89,10 @@ SHA256SUMS
 app/app-release.apk
 backend/amd64/GoKeyMux.exe        + Interception/ + proto/ + …
 backend/386/GoKeyMux.exe          + Interception/ + proto/ + …
-platform-tools/adb.exe
+platform-tools/adb.exe            ← adb 随包内置，用户零下载
 config.template.json
 install-fakerinput.ps1
+get-adb.ps1                       ← 仅当 platform-tools\ 缺失时的下载向导
 start-amd64.bat
 start-386.bat
 README.md
@@ -125,14 +133,17 @@ ARCH=amd64 ./scripts/assemble.sh
 
 `gh` 不是必需依赖：脚本用 `curl` 直接从
 `https://github.com/<repo>/releases/download/<tag>/<asset>` 下载，
-并在下载前先用 HEAD 请求确认资产存在，失败即报错退出（不会打出残缺包）。
+并在下载前先用 `curl -IL` 跟随 302 重定向确认资产存在，失败即报错退出（不会打出残缺包）。
 
 ## 维护备忘
 
 - **改打包逻辑只改 `scripts/assemble.sh` 一处**，CI 与 CD 共用，避免两份逻辑漂移。
-- `platform-tools-latest-*` 永远指向 Google 最新版 adb。若遇到新版 adb 与老旧
-  Android 不兼容，需要改成固定版本 URL，或把 adb 入库。
+- adb 在构建时按 `ADB_MIRRORS` 顺序尝试下载（**腾讯云 → 阿里云 → Google**）并打进包，
+  因此用户双击脚本即可用、不需要梯子。任一源失败会继续试下一个，全部失败才终止构建。
+- `platform-tools-latest-*` 恒指向最新版 adb。若新版 adb 与老旧 Android 不兼容，
+  需改成固定版本 URL，或把特定版本的 adb 入库。
 - `assemble.sh` 解出的 `platform-tools/` 目录名由 Google 包结构保证，勿改。
+- 只有当包内 `platform-tools\` 缺失时，`get-adb.ps1` 才会被启动脚本拉起（选项菜单换源）。
 - 打包产物落在 `dist/`，已在 `.gitignore` 忽略。
 - 后端首跑会在**后端自己的目录**生成 `config.json`（启动脚本用 `pushd` 保证），
   所以配置不会污染解压根目录。

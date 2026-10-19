@@ -123,20 +123,34 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $unzip = Get-Command unzip -ErrorAction SilentlyContinue
-          if (-not $unzip) {
-            $fallback = 'C:\ProgramData\chocolatey\bin\unzip.exe'
-            if (Test-Path $fallback) {
-              $unzip = Get-Item $fallback
-            } else {
-              choco install unzip -y --no-progress
-              "C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
-              $unzip = Get-Item $fallback
+
+          function Resolve-Unzip {
+            $cmd = Get-Command unzip -ErrorAction SilentlyContinue
+            if ($cmd) { return $cmd }
+            foreach ($p in @(
+              'C:\ProgramData\chocolatey\bin\unzip.exe',
+              'C:\ProgramData\chocolatey\lib\unzip\tools\unzip.exe'
+            )) {
+              if (Test-Path $p) { return (Get-Item $p) }
             }
+            return $null
           }
-          Write-Host ("using unzip: " + $unzip.FullName)
-          # 顺手确认它到底支不支持 -Z1（不支持也不影响，校验步骤会自动退化）
-          & $unzip.FullName -Z1 2>&1 | Select-Object -First 3
+
+          $unzip = Resolve-Unzip
+          if (-not $unzip) {
+            Write-Host 'unzip not found, installing via chocolatey...'
+            choco install unzip -y --no-progress | Out-Host
+            "C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+            $unzip = Resolve-Unzip
+          }
+
+          if (-not $unzip) {
+            throw 'unzip 安装后仍找不到可执行文件，无法继续'
+          }
+
+          Write-Host ("using unzip: " + $unzip.Source)
+          # 各实现的支持度不同；不支持 -Z1 也没关系，校验步骤会自动退化用 unzip -l
+          try { & $unzip.Source -v 2>&1 | Select-Object -First 2 | Out-Host } catch { Write-Host 'unzip -v failed (ignored)' }
 
       - name: 执行 assemble.sh
         env:
@@ -184,6 +198,7 @@ jobs:
             'backend/amd64/Interception/library/x64/interception.dll' \
             'platform-tools/adb.exe' \
             'install-fakerinput.ps1' \
+            'get-adb.ps1' \
             'README.md' ; do
             # 用 grep -c 而不是 grep -q：-q 提前退出会让上游 sed/unzip 收到 SIGPIPE，
             # 在 `set -euo pipefail` 下反而把整步判失败

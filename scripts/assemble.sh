@@ -2,6 +2,10 @@
 #
 # assemble.sh —— 把「前端 APK + 后端 Go 服务 + adb + 启动脚本」打成解压即用的 zip
 #
+# adb 会在构建时从 versions.env 的 ADB_MIRRORS 里按顺序尝试下载并打进包，
+# 所以用户解压后双击脚本即可用，不需要联网；只有包内 platform-tools\ 缺失时，
+# 启动脚本才会拉起下载向导（get-adb.ps1）让用户自己选源。
+#
 # 用法:
 #   ./scripts/assemble.sh [windows] [amd64|386] [version]
 #
@@ -58,6 +62,11 @@ for v in FRONTEND_REPO FRONTEND_TAG FRONTEND_ASSET \
     exit 1
   fi
 done
+
+if [ "${#ADB_MIRRORS[@]}" -eq 0 ]; then
+  echo "assemble.sh: versions.env 的 ADB_MIRRORS 为空，至少需要一个 adb 下载源" >&2
+  exit 1
+fi
 
 command -v curl >/dev/null 2>&1 || { echo "assemble.sh: 缺少依赖 'curl'" >&2; exit 1; }
 
@@ -163,8 +172,6 @@ trap 'rm -rf "$WORK"' EXIT
 PKG="$WORK/pkg"
 mkdir -p "$PKG/app" "$PKG/platform-tools" "$PKG/backend/amd64" "$PKG/backend/386"
 
-ADB_URL="https://dl.google.com/android/repository/platform-tools-latest-windows.zip"
-
 echo "==> DartKeyMux-Dist 打包"
 echo "    PACKAGE_VERSION = $PACKAGE_VERSION"
 echo "    platform/arch   = $PLATFORM/$ARCH"
@@ -211,15 +218,37 @@ if [ -z "$MSI_FOUND" ]; then
 fi
 
 # ---------------------------------------------------------------------------
-# 3. adb（Android platform-tools，构建时现拉，不入库）
+# 3. adb（Android platform-tools）—— 构建时打进包，用户开箱即用、无需联网
+#    来源按 versions.env 里 ADB_MIRRORS 的顺序尝试（国内镜像优先，Google 兜底）
 # ---------------------------------------------------------------------------
-echo "==> [3/4] adb (platform-tools-latest-windows)"
-curl -fsSL "${CURL_OPTS[@]}" "${CURL_AUTH[@]}" -o "$WORK/pt.zip" "$ADB_URL"
-extract_zip "$WORK/pt.zip" "$PKG"
-if [ ! -f "$PKG/platform-tools/adb.exe" ]; then
-  echo "assemble.sh: platform-tools 包里没有 adb.exe" >&2
+echo "==> [3/4] adb (Android platform-tools，将打进包)"
+ADB_OK=""
+for entry in "${ADB_MIRRORS[@]}"; do
+  mirror_name="${entry%%|*}"
+  mirror_url="${entry#*|}"
+  echo "    尝试 $mirror_name"
+  if curl -fsSL "${CURL_OPTS[@]}" "${CURL_AUTH[@]}" -o "$WORK/pt.zip" "$mirror_url"; then
+    # 解压目标用临时目录：某个源下到坏文件时不至于把 PKG 弄脏
+    rm -rf "$WORK/pt"
+    mkdir -p "$WORK/pt"
+    if extract_zip "$WORK/pt.zip" "$WORK/pt" && [ -f "$WORK/pt/platform-tools/adb.exe" ]; then
+      rm -rf "$PKG/platform-tools"
+      mv "$WORK/pt/platform-tools" "$PKG/platform-tools"
+      ADB_OK="$mirror_name"
+      break
+    fi
+    echo "        下载到了但内容不是有效的 platform-tools，换下一个源" >&2
+  else
+    echo "        下载失败，换下一个源" >&2
+  fi
+done
+
+if [ -z "$ADB_OK" ]; then
+  echo "assemble.sh: 所有 adb 下载源都失败了，无法产出可用的包" >&2
+  echo "             请检查 versions.env 的 ADB_MIRRORS，或稍后重试" >&2
   exit 1
 fi
+echo "        adb 来源: $ADB_OK"
 
 # ---------------------------------------------------------------------------
 # 4. 启动脚本与说明
@@ -228,6 +257,7 @@ echo "==> [4/4] 启动脚本与 README"
 cp "$ROOT/scripts/start-amd64.bat"        "$PKG/start-amd64.bat"
 cp "$ROOT/scripts/start-386.bat"          "$PKG/start-386.bat"
 cp "$ROOT/scripts/install-fakerinput.ps1" "$PKG/install-fakerinput.ps1"
+cp "$ROOT/scripts/get-adb.ps1"            "$PKG/get-adb.ps1"
 [ -f "$ROOT/PACKAGE-README.md" ] && cp "$ROOT/PACKAGE-README.md" "$PKG/README.md"
 [ -f "$ROOT/scripts/config.template.json" ] && cp "$ROOT/scripts/config.template.json" "$PKG/config.template.json"
 
