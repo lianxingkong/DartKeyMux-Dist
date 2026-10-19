@@ -269,6 +269,10 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      # gh 在推断「当前仓库」时会去读 .git；不 checkout 就会报
+      # fatal: not a git repository。下面所有 gh 命令同时显式带 --repo，双保险。
+      - uses: actions/checkout@v4
+
       - name: 下载全部产物
         uses: actions/download-artifact@v4
         with:
@@ -299,20 +303,24 @@ jobs:
             echo "| 后端 GoKeyMux | \`$BE\` |"
             echo "| gRPC / adb reverse 端口 | \`50051\` |"
             echo ""
-            echo "包内含：前端 APK、后端 GoKeyMux（amd64 + 386）、Android platform-tools（adb）、启动脚本、FakerInput 驱动安装包。"
+            echo "包内含：前端 APK、后端 GoKeyMux（amd64 + 386）、Android platform-tools（adb，已内置，无需联网下载）、启动脚本、FakerInput 驱动安装包、adb 换源向导。"
             echo ""
             echo "请下载与你的版本号一致的 zip，并用 \`SHA256SUMS\` 校验完整性。"
             echo ""
             echo "> 本 release 的产物由 GitHub Actions 自动构建；前/后端版本号对齐关系记录在压缩包的 \`README.md\` 中。"
           } > "$notes"
 
-          if gh release view "$VERSION" >/dev/null 2>&1; then
+          # --repo 显式指定，避免 gh 依赖当前目录的 .git 推断仓库
+          if gh release view "$VERSION" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "release $VERSION 已存在，改为上传资产（--clobber 覆盖同名文件）"
-            gh release upload "$VERSION" dist/*.zip dist/SHA256SUMS --clobber
-            gh release edit "$VERSION" --notes-file "$notes"
+            gh release upload "$VERSION" dist/*.zip dist/SHA256SUMS \
+              --repo "$GITHUB_REPOSITORY" --clobber
+            gh release edit "$VERSION" \
+              --repo "$GITHUB_REPOSITORY" --notes-file "$notes"
           else
             echo "创建 release $VERSION"
             gh release create "$VERSION" dist/*.zip dist/SHA256SUMS \
+              --repo "$GITHUB_REPOSITORY" \
               --title "DartKeyMux $VERSION（整合分发）" \
               --notes-file "$notes"
           fi
