@@ -123,11 +123,20 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          if (-not (Get-Command unzip -ErrorAction SilentlyContinue)) {
-            choco install unzip -y --no-progress
-            "C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+          $unzip = Get-Command unzip -ErrorAction SilentlyContinue
+          if (-not $unzip) {
+            $fallback = 'C:\ProgramData\chocolatey\bin\unzip.exe'
+            if (Test-Path $fallback) {
+              $unzip = Get-Item $fallback
+            } else {
+              choco install unzip -y --no-progress
+              "C:\ProgramData\chocolatey\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+              $unzip = Get-Item $fallback
+            }
           }
-          unzip -v | Select-Object -First 2
+          Write-Host ("using unzip: " + $unzip.FullName)
+          # 顺手确认它到底支不支持 -Z1（不支持也不影响，校验步骤会自动退化）
+          & $unzip.FullName -Z1 2>&1 | Select-Object -First 3
 
       - name: 执行 assemble.sh
         env:
@@ -144,12 +153,28 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}
           PACKAGE_VERSION_OVERRIDE: ${{ needs.prepare.outputs.version }}
+        shell: bash
         run: |
           set -euo pipefail
           zip_file="dist/app-${PACKAGE_VERSION_OVERRIDE}-windows-${ARCH}.zip"
           [ -f "$zip_file" ] || { echo "::error::没有产出 $zip_file"; exit 1; }
 
-          listing="$(unzip -Z1 "$zip_file")"
+          # 各 runner 上的 unzip 不是同一个实现：
+          #   Ubuntu Info-ZIP 支持 `unzip -Z1`（只列文件名）
+          #   Windows(choco) 的 unzip 不支持 -Z1，会直接报错
+          # 所以先试 -Z1，失败就退化用 `unzip -l` 并剥掉前 3 行 / 后 2 行的表头表尾。
+          list_entries() { # zipfile
+            local out
+            if out="$(unzip -Z1 "$1" 2>/dev/null)" && [ -n "$out" ]; then
+              printf '%s\n' "$out"
+            else
+              unzip -l "$1" | sed -e '1,3d' -e '$d' -e '$d' -e 's/^ *[0-9][0-9]* *[0-9-]* *[0-9:]* *//'
+            fi
+          }
+
+          listing="$(list_entries "$zip_file" | tr -d '\r' | sed 's|^\./||; s|\\|/|g')"
+
+          missing=0
           for required in \
             'start-amd64.bat' \
             'start-386.bat' \
@@ -160,38 +185,51 @@ jobs:
             'platform-tools/adb.exe' \
             'install-fakerinput.ps1' \
             'README.md' ; do
-            if printf '%s\n' "$listing" | grep -qx "$required"; then
+            # 用 grep -c 而不是 grep -q：-q 提前退出会让上游 sed/unzip 收到 SIGPIPE，
+            # 在 `set -euo pipefail` 下反而把整步判失败
+            if [ "$(printf '%s\n' "$listing" | grep -cx -- "$required")" -gt 0 ]; then
               echo "ok   $required"
             else
               echo "::error::$zip_file 内缺少 $required"
-              exit 1
+              missing=1
+            fi
+          done
+
+          # 包内还应有（可选）：FakerInput 驱动安装包、后端配置模板
+          for optional in "$FAKERINPUT_MSI" 'config.template.json'; do
+            if printf '%s\n' "$listing" | grep -qx -- "$optional"; then
+              echo "ok   $optional (可选)"
+            else
+              echo "::warning::$zip_file 内没有 $optional（可选文件）"
             fi
           done
 
           {
-            echo "### \`$zip_file\`"
+            echo "### \`$zip_file\` 内容清单"
             echo '```'
-            unzip -l "$zip_file"
+            printf '%s\n' "$listing"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
 
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::包内结构校验未通过，上面的清单即为实际内容"
+            exit 1
+          fi
+
       - name: 生成校验和
+        shell: pwsh
         env:
           ARCH: ${{ matrix.arch }}
           PACKAGE_VERSION_OVERRIDE: ${{ needs.prepare.outputs.version }}
         run: |
-          set -euo pipefail
-          cd dist
-          if command -v sha256sum >/dev/null 2>&1; then
-            sha256sum "app-${PACKAGE_VERSION_OVERRIDE}-windows-${ARCH}.zip" >> SHA256SUMS
-          else
-            # GitHub Windows runner 走这条
-            certutil -hashfile "app-${PACKAGE_VERSION_OVERRIDE}-windows-${ARCH}.zip" SHA256 \
-              | sed -n 2p \
-              | tr -d ' \r' \
-              | sed "s|\$|  app-${PACKAGE_VERSION_OVERRIDE}-windows-${ARCH}.zip|" >> SHA256SUMS
-          fi
-          cat SHA256SUMS
+          $ErrorActionPreference = 'Stop'
+          $name = "app-$env:PACKAGE_VERSION_OVERRIDE-windows-$env:ARCH.zip"
+          $path = Join-Path 'dist' $name
+          if (-not (Test-Path $path)) { throw "缺少产物 $path" }
+          $hash = (Get-FileHash -Algorithm SHA256 -LiteralPath $path).Hash.ToLower()
+          $line = "$hash  $name"
+          Add-Content -Path 'dist/SHA256SUMS' -Value $line -Encoding ascii
+          Write-Host $line
 
       - name: 上传产物
         uses: actions/upload-artifact@v4

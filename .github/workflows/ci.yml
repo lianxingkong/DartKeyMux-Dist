@@ -145,12 +145,20 @@ jobs:
           zip_file="dist/app-${PACKAGE_VERSION}-windows-amd64.zip"
           [ -f "$zip_file" ] || { echo "::error::没有产出 $zip_file"; exit 1; }
 
-          echo '### 包内结构' >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
-          unzip -l "$zip_file" >> "$GITHUB_STEP_SUMMARY"
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          # 不同 runner 上的 unzip 实现不同（Ubuntu Info-ZIP 支持 -Z1，Windows 的未必），
+          # 所以先试 -Z1，失败退化用 `unzip -l` 并剥掉表头表尾。
+          list_entries() { # zipfile
+            local out
+            if out="$(unzip -Z1 "$1" 2>/dev/null)" && [ -n "$out" ]; then
+              printf '%s\n' "$out"
+            else
+              unzip -l "$1" | sed -e '1,3d' -e '$d' -e '$d' -e 's/^ *[0-9][0-9]* *[0-9-]* *[0-9:]* *//'
+            fi
+          }
 
-          listing="$(unzip -Z1 "$zip_file")"
+          listing="$(list_entries "$zip_file" | tr -d '\r' | sed 's|^\./||; s|\\|/|g')"
+
+          missing=0
           for required in \
             'start-amd64.bat' \
             'start-386.bat' \
@@ -161,13 +169,26 @@ jobs:
             'platform-tools/adb.exe' \
             'install-fakerinput.ps1' \
             'README.md' ; do
-            if printf '%s\n' "$listing" | grep -qx "$required"; then
+            # 用 grep -c 而非 -q：-q 提前退出会触发 SIGPIPE，在 pipefail 下误判失败
+            if [ "$(printf '%s\n' "$listing" | grep -cx -- "$required")" -gt 0 ]; then
               echo "ok   $required"
             else
               echo "::error::包内缺少 $required"
-              exit 1
+              missing=1
             fi
           done
+
+          {
+            echo '### 包内清单'
+            echo '```'
+            printf '%s\n' "$listing"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$missing" -ne 0 ]; then
+            echo "::error::包内结构校验未通过，上面的清单即为实际内容"
+            exit 1
+          fi
 
       - name: 上传产物
         uses: actions/upload-artifact@v4
