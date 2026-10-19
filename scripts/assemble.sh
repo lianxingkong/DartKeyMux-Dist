@@ -113,9 +113,14 @@ fi
 #   在 Linux/macOS 的 curl 上该选项会被忽略，无副作用。
 CURL_OPTS=(--ssl-revoke-best-effort --retry 3 --retry-delay 2 --retry-connrefused)
 
-# 可选：给 curl 带上 token，提高速率上限（公开仓库不需要）
+# 可选：给 curl 带上 token，提高速率上限（两个仓库都是 public，不配也能跑）。
+#
+# 注意：不要传本仓库的 GITHUB_TOKEN！它只对本仓库有效，拿去请求别的仓库的
+# release 下载地址会返回 401（带无效凭据比匿名更糟）。只在有真正的 PAT 时才传。
 CURL_AUTH=()
-if [ -n "${GITHUB_TOKEN:-}" ]; then
+if [ -n "${PAT:-}" ]; then
+  CURL_AUTH=(-H "Authorization: Bearer ${PAT}")
+elif [ -n "${GITHUB_TOKEN:-}" ]; then
   CURL_AUTH=(-H "Authorization: Bearer ${GITHUB_TOKEN}")
 elif [ -n "${GH_TOKEN:-}" ]; then
   CURL_AUTH=(-H "Authorization: Bearer ${GH_TOKEN}")

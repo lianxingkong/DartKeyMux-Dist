@@ -83,7 +83,10 @@ jobs:
 
       - name: 校验前后端 release 与资产确实存在
         env:
-          CURL_TOKEN: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
+          # 只用 PAT（可选）。绝不能带上本仓库的 GITHUB_TOKEN：
+          # 它只对本仓库有效，拿去请求别的仓库会得到 401，比匿名还糟。
+          # 不配 PAT 时 CURL_TOKEN 为空 → 走匿名请求，两个公开仓库照样能下。
+          CURL_TOKEN: ${{ secrets.PAT }}
         run: |
           set -euo pipefail
           AUTH=()

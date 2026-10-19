@@ -71,9 +71,9 @@ jobs:
 
       - name: 确认前后端 tag 与资产存在
         env:
-          # 两个仓库都是 public，默认 GITHUB_TOKEN 即可下载；
-          # 配了 secrets.PAT 就用 PAT（更稳，且不受匿名速率限制影响）。
-          CURL_TOKEN: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
+          # 只用 PAT（可选）。两个仓库都是 public，不配也能匿名下载；
+          # 但绝不能带本仓库的 GITHUB_TOKEN 去请求别的仓库（会 401）。
+          CURL_TOKEN: ${{ secrets.PAT }}
         run: |
           set -euo pipefail
           set -a
@@ -133,7 +133,9 @@ jobs:
         env:
           ARCH: ${{ matrix.arch }}
           PACKAGE_VERSION_OVERRIDE: ${{ needs.prepare.outputs.version }}
-          GITHUB_TOKEN: ${{ secrets.PAT || secrets.GITHUB_TOKEN }}
+          # 有 PAT 用 PAT；没有就给空串，让 assemble.sh 走匿名请求。
+          # 不要在这里塞 secrets.GITHUB_TOKEN（跨仓库请求会 401）。
+          GITHUB_TOKEN: ${{ secrets.PAT || '' }}
         run: |
           chmod +x scripts/assemble.sh
           ./scripts/assemble.sh
