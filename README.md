@@ -29,6 +29,7 @@
 │   ├── assemble.sh            # ★ 唯一的打包逻辑，CI 与 CD 共用
 │   ├── start-amd64.bat        # 包内启动脚本（64 位）
 │   ├── start-386.bat          # 包内启动脚本（32 位）
+│   ├── install-apk.bat        # 包内强制安装/更新 App（启动脚本只在未安装时才装）
 │   ├── start.sh               # 非 Windows 占位说明
 │   ├── install-fakerinput.ps1 # FakerInput 驱动静默安装（自动提权）
 │   ├── get-adb.ps1            # adb 下载向导（包内 platform-tools\ 缺失时才触发）
@@ -73,6 +74,15 @@ CI 会自动校验「tag 存在 + 资产名对得上」。
 | 后端运行时依赖 | `Interception/`（含 `interception.dll`）、`proto/` | 必须随包保留，删掉后端起不来 |
 | adb | 构建时从 `ADB_MIRRORS` 按序下载（腾讯云 → 阿里云 → Google），**打进包但不入库** | `platform-tools-latest-windows.zip` |
 
+手动启动（不用脚本）时，反向映射端口同样必须是 **50051**：
+
+```
+platform-tools\adb.exe reverse tcp:50051 tcp:50051
+```
+
+端口写错的典型表现是「命令都成功了，但 App 连不上后端」。三处端口（App `grpcPort`、
+后端 `gRPCAddress`、反代命令）必须同时改，详见 [PACKAGE-README.md](./PACKAGE-README.md) 第六节。
+
 ## 产物
 
 每个架构各一个包，包内**同时**带有两个架构的后端（用户不必为位数挑包）：
@@ -93,6 +103,7 @@ platform-tools/adb.exe            ← adb 随包内置，用户零下载
 config.template.json
 install-fakerinput.ps1
 get-adb.ps1                       ← 仅当 platform-tools\ 缺失时的下载向导
+install-apk.bat                   ← 强制安装 / 更新 App（保留数据）
 start-amd64.bat
 start-386.bat
 README.md
@@ -147,3 +158,8 @@ ARCH=amd64 ./scripts/assemble.sh
 - 打包产物落在 `dist/`，已在 `.gitignore` 忽略。
 - 后端首跑会在**后端自己的目录**生成 `config.json`（启动脚本用 `pushd` 保证），
   所以配置不会污染解压根目录。
+- 启动脚本只在「手机上还没装 App」时安装（`adb shell pm path` 判断），已安装则跳过，
+  避免每次重插数据线都重装、打断正在运行的 App。**新版本更新由 `install-apk.bat` 负责**，
+  所以打包时务必带上它（`assemble.sh` 与 CI 冒烟清单都已包含）。
+- 三个 bat（`start-amd64.bat`、`start-386.bat`、`install-apk.bat`）各自内嵌了设备检查逻辑；
+  改判定规则或错误提示时，三处要一起改。

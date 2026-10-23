@@ -29,7 +29,7 @@ jobs:
       fakerinput_msi: ${{ steps.resolve.outputs.fakerinput_msi }}
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 解析
         id: resolve
@@ -119,7 +119,7 @@ jobs:
         shell: bash
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 安装 unzip
         shell: pwsh
@@ -195,6 +195,7 @@ jobs:
           for required in \
             'start-amd64.bat' \
             'start-386.bat' \
+            'install-apk.bat' \
             'app/app-release.apk' \
             'backend/amd64/GoKeyMux.exe' \
             'backend/386/GoKeyMux.exe' \
@@ -251,7 +252,7 @@ jobs:
           Write-Host $line
 
       - name: 上传产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: package-${{ matrix.arch }}
           path: |
@@ -271,10 +272,10 @@ jobs:
     steps:
       # gh 在推断「当前仓库」时会去读 .git；不 checkout 就会报
       # fatal: not a git repository。下面所有 gh 命令同时显式带 --repo，双保险。
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 下载全部产物
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true

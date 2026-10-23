@@ -18,7 +18,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 读取 versions.env
         run: |
@@ -123,7 +123,7 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: 安装打包依赖
         run: |
@@ -162,6 +162,7 @@ jobs:
           for required in \
             'start-amd64.bat' \
             'start-386.bat' \
+            'install-apk.bat' \
             'app/app-release.apk' \
             'backend/amd64/GoKeyMux.exe' \
             'backend/386/GoKeyMux.exe' \
@@ -202,7 +203,7 @@ jobs:
           fi
 
       - name: 上传产物
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: smoke-package-amd64
           path: dist/*.zip
