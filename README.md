@@ -163,3 +163,8 @@ ARCH=amd64 ./scripts/assemble.sh
   所以打包时务必带上它（`assemble.sh` 与 CI 冒烟清单都已包含）。
 - 三个 bat（`start-amd64.bat`、`start-386.bat`、`install-apk.bat`）各自内嵌了设备检查逻辑；
   改判定规则或错误提示时，三处要一起改。
+- 三个 bat 是 **UTF-8（无 BOM）+ CRLF**，顶部有一段“切代码页后在新 cmd 进程里重读自己”的
+  自重启块（`:dkm_main`）。这是为了绕开中文 Windows 的坑：cmd 按进程启动时的代码页（936）
+  解析 .bat，脚本里 `chcp 65001` 只改显示不改解析，UTF-8 中文会把后续 ASCII 前缀吃掉，
+  表现为 `'xxx' is not recognized` 或乱码。**`:dkm_main` 之前只能放 ASCII**，别把中文移到前面，
+  也别删掉这个块。

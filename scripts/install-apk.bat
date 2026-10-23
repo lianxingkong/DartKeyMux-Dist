@@ -1,6 +1,19 @@
 @echo off
-chcp 65001 >nul
+rem ---------------------------------------------------------------------------
+rem  UTF-8 batch on Chinese Windows: cmd decodes the .bat using the code page
+rem  captured at process start (936), so an in-file "chcp 65001" only changes
+rem  display, not parsing, and Chinese text eats the ASCII prefix of the next
+rem  token ("'xxx' is not recognized"). Re-exec in a FRESH cmd process after
+rem  switching the code page, then parse this file again from the top.
+rem  Keep everything above :dkm_main ASCII-only.
+rem ---------------------------------------------------------------------------
 setlocal
+if defined DKM_UTF8 goto :dkm_main
+set "DKM_UTF8=1"
+chcp 65001 >nul
+cmd /c ""%~f0" %*"
+exit /b %ERRORLEVEL%
+:dkm_main
 cd /d "%~dp0"
 title DartKeyMux 安装 / 更新 App
 
